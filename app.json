@@ -65,12 +65,12 @@
         "origin": false
       },
       "firebase": {
-        "apiKey": "REPLACE_ME",
-        "authDomain": "REPLACE_ME.firebaseapp.com",
-        "projectId": "REPLACE_ME",
-        "storageBucket": "REPLACE_ME.appspot.com",
-        "messagingSenderId": "REPLACE_ME",
-        "appId": "REPLACE_ME"
+        "apiKey": "AIzaSyB53JflT1DkNfKJ8Ws2-DAiN943QHzp9O0",
+        "authDomain": "squadbuddy-2cc01.firebaseapp.com",
+        "projectId": "squadbuddy-2cc01",
+        "storageBucket": "squadbuddy-2cc01.firebasestorage.app",
+        "messagingSenderId": "313003899520",
+        "appId": "1:313003899520:web:6a6d0c615f15621aadc465"
       }
     }
   }
