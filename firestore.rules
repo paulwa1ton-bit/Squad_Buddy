@@ -1,0 +1,68 @@
+rules_version = '2';
+
+// Matches the access pattern the app actually uses (see lib/teamSync.ts,
+// lib/parentSync.ts and the store/*.ts write-through calls):
+//   - A team's manager (Team.managerUserId) is the only one who can write
+//     that team's own doc, players, formations and matches.
+//   - Any signed-in user (manager or parent) can READ a team/players/
+//     formations/matches once they know its id - equivalent to a shared
+//     "team code" link, same trust model as the in-app join-by-code flow.
+//   - A parent can only write their own parent doc; any signed-in user can
+//     read a parent doc (needed so a manager's device can show a linked
+//     parent's name/phone/email in Settings).
+//   - Invites are created by managers and updated (RSVP) by parents; kept
+//     permissive between signed-in users for the MVP.
+//
+// This is a reasonable starting point for a grassroots app, not a hardened
+// multi-tenant ruleset - before a wider rollout, consider tightening parent
+// PII reads to only managers who share a team with that parent (needs a
+// custom claim or a team-membership lookup) rather than "any signed-in user".
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isTeamManager(teamId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/teams/$(teamId)).data.managerUserId == request.auth.uid;
+    }
+
+    match /teams/{teamId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.managerUserId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.managerUserId == request.auth.uid;
+
+      match /players/{playerId} {
+        allow read: if isSignedIn();
+        allow write: if isTeamManager(teamId);
+      }
+
+      match /formations/{formationId} {
+        allow read: if isSignedIn();
+        allow write: if isTeamManager(teamId);
+      }
+
+      match /matches/{matchId} {
+        allow read: if isSignedIn();
+        allow write: if isTeamManager(teamId);
+      }
+    }
+
+    match /parents/{parentId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == parentId;
+    }
+
+    match /invites/{inviteId} {
+      // Managers create invites (from the match setup screen) and only ever
+      // read them afterward; the app never has a manager update or delete
+      // one, so only the invited parent - responding accept/decline - can.
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.parentId == request.auth.uid;
+      allow delete: if false;
+    }
+  }
+}
