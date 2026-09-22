@@ -71,7 +71,12 @@ function positionFitScore(
  */
 function fairShareSecondsPerOutfieldPlayer(match: Match, players: Player[]): number {
   const totalTargetSeconds = match.minutesPerPeriod * totalPeriods(match) * 60;
-  const onFieldNow = match.lineup.filter((e) => !!e.onFieldSince);
+  // Before kickoff nobody has onFieldSince yet, but the starting lineup
+  // (and therefore the number of outfield pitch slots) is already fixed -
+  // fall back to isStarter so this also works for pre-match planning.
+  const onFieldNow = match.status === "scheduled"
+    ? match.lineup.filter((e) => e.isStarter)
+    : match.lineup.filter((e) => !!e.onFieldSince);
   const outfieldSlots = onFieldNow.filter((e) => e.currentPosition !== "GK").length;
   const playerById = new Map(players.map((p) => [p.id, p]));
   const outfieldSquadCount = match.squadPlayerIds.filter((id) => {
@@ -201,6 +206,63 @@ export function recommendSubstitutions({
  * breaks (e.g. the end of a period) rather than only when they remember to
  * tap "Recommend a substitution".
  */
+export interface MatchPlan {
+  /** Each outfield player's target minutes for this match, for equal game time. */
+  fairShareMinutes: number;
+  totalMatchMinutes: number;
+  /** Suggested match-clock minutes at which to make a change, spread evenly
+   * across the outfield bench so each sub gets a clear "you're on around
+   * minute X" slot and nobody sits out the whole warm-up-to-cold cycle. */
+  subWindows: number[];
+  /** Starters with nobody on the bench who plays their position or even the
+   * same broad area of the pitch - realistically they're playing long
+   * minutes this match whether or not the plan above says otherwise. */
+  noCoverPlayerIds: string[];
+}
+
+/**
+ * Whether any bench player is a sane like-for-like (or same-area) cover for
+ * a given position - a stricter bar than canFillPosition, which only rules
+ * out outright nonsensical GK/outfield swaps. This is for flagging "there's
+ * genuinely nobody else for this shirt", not for picking a substitute.
+ */
+function hasReasonableCover(benchPlayers: Player[], neededPosition: PlayingPosition | undefined): boolean {
+  if (!neededPosition) return true; // nothing recorded to check cover against
+  if (neededPosition === "GK") return benchPlayers.some((p) => p.primaryPositions.includes("GK"));
+  return benchPlayers.some((p) => positionFitScore(p.primaryPositions, neededPosition) >= 0.6);
+}
+
+/**
+ * A pre-match game plan: the fair-share minute target, suggested moments to
+ * make changes so the bench rotates through evenly, and which starters have
+ * no real cover and should be expected to play long minutes. Meant for the
+ * kickoff screen - a plan the manager can glance at before the whistle,
+ * rather than only reacting to recommendations once the clock is running.
+ */
+export function buildMatchPlan({ match, players }: { match: Match; players: Player[] }): MatchPlan | null {
+  const starters = match.lineup.filter((e) => e.isStarter);
+  if (starters.length === 0) return null;
+
+  const totalMatchMinutes = match.minutesPerPeriod * totalPeriods(match);
+  const fairShareMinutes = Math.round(fairShareSecondsPerOutfieldPlayer(match, players) / 60);
+
+  const playerById = new Map(players.map((p) => [p.id, p]));
+  const benchIds = match.squadPlayerIds.filter((id) => !starters.some((e) => e.playerId === id));
+  const benchPlayers = benchIds.map((id) => playerById.get(id)).filter((p): p is Player => !!p);
+  const outfieldBenchCount = benchPlayers.filter((p) => !isDedicatedGoalkeeper(p.primaryPositions)).length;
+
+  const subWindows: number[] = [];
+  for (let i = 1; i <= outfieldBenchCount; i += 1) {
+    subWindows.push(Math.round((totalMatchMinutes * i) / (outfieldBenchCount + 1)));
+  }
+
+  const noCoverPlayerIds = starters
+    .filter((entry) => !hasReasonableCover(benchPlayers, entry.currentPosition))
+    .map((entry) => entry.playerId);
+
+  return { fairShareMinutes, totalMatchMinutes, subWindows, noCoverPlayerIds };
+}
+
 export function hasSignificantEquityGap(input: RecommendInput): boolean {
   const suggestions = recommendSubstitutions(input);
   if (suggestions.length === 0) return false;

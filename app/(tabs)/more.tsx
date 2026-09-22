@@ -39,6 +39,9 @@ function ManagerMore() {
           <Text style={styles.bodyText}>{team?.name}</Text>
           <Text style={styles.mutedText}>{team?.league} · {team?.ageGroup} · {team?.format}</Text>
         </View>
+        <Pressable style={styles.switchTeamButton} onPress={() => router.push("/edit-team")}>
+          <Text style={styles.switchTeamButtonText}>Edit team details / photos</Text>
+        </Pressable>
         <Pressable style={styles.switchTeamButton} onPress={() => router.push("/(onboarding)/team-select")}>
           <Text style={styles.switchTeamButtonText}>Switch or add a team (up to 2)</Text>
         </Pressable>

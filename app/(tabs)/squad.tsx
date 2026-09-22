@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, FlatList, Pressable, Modal, TextInput, ScrollView,
 } from "react-native";
@@ -195,6 +195,7 @@ interface AnalyticsRow {
   playerId: string;
   name: string;
   appearances: number;
+  avgMinutes: number | null;
   goals: number;
   assists: number;
   yellowCards: number;
@@ -202,10 +203,23 @@ interface AnalyticsRow {
   minutesPerGoal: number | null;
 }
 
+const STAT_COLUMNS: { key: "appearances" | "avgMinutes" | "goals" | "assists" | "yellowCards" | "redCards" | "minutesPerGoal"; label: string }[] = [
+  { key: "appearances", label: "GP" },
+  { key: "avgMinutes", label: "Avg Min" },
+  { key: "goals", label: "Goals" },
+  { key: "assists", label: "Assists" },
+  { key: "yellowCards", label: "YC" },
+  { key: "redCards", label: "RC" },
+  { key: "minutesPerGoal", label: "Min/Goal" },
+];
+
 function AnalyticsPanel() {
   const team = useTeamStore((s) => s.team);
   const players = useTeamStore((s) => s.players.filter((p) => !p.archived));
   const getSeasonTotals = useMatchStore((s) => s.getSeasonTotals);
+
+  const headerScrollRef = useRef<ScrollView>(null);
+  const nameColScrollRef = useRef<ScrollView>(null);
 
   const rows = useMemo<AnalyticsRow[]>(() => {
     if (!team) return [];
@@ -220,6 +234,7 @@ function AnalyticsPanel() {
           assists: totals.assists,
           yellowCards: totals.yellowCards,
           redCards: totals.redCards,
+          avgMinutes: totals.appearances > 0 ? Math.round(totals.minutesPlayed / totals.appearances) : null,
           minutesPerGoal: totals.goals > 0 ? Math.round(totals.minutesPlayed / totals.goals) : null,
         };
       })
@@ -235,38 +250,77 @@ function AnalyticsPanel() {
   }
 
   return (
-    <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}>
+    <View style={{ flex: 1, padding: spacing.lg }}>
       <Text style={styles.sectionTitle}>Season analytics</Text>
-      <Text style={styles.mutedText}>Based on completed matches only.</Text>
-      <ScrollView horizontal style={{ marginTop: spacing.sm }}>
-        <View>
-          <View style={[styles.statsRow, styles.statsHeaderRow]}>
-            <Text style={[styles.statsCell, styles.statsNameCell, styles.statsHeaderText]}>Player</Text>
-            <Text style={[styles.statsCell, styles.statsHeaderText]}>GP</Text>
-            <Text style={[styles.statsCell, styles.statsHeaderText]}>Goals</Text>
-            <Text style={[styles.statsCell, styles.statsHeaderText]}>Assists</Text>
-            <Text style={[styles.statsCell, styles.statsHeaderText]}>YC</Text>
-            <Text style={[styles.statsCell, styles.statsHeaderText]}>RC</Text>
-            <Text style={[styles.statsCell, styles.statsHeaderText]}>Min/Goal</Text>
+      <Text style={styles.mutedText}>Based on completed matches only. Tap a player to view their profile.</Text>
+
+      <View style={styles.tableWrap}>
+        {/* Header row: the "Player" corner is truly fixed; the stat titles scroll
+            horizontally in lockstep with the body below (driven, not touchable). */}
+        <View style={{ flexDirection: "row" }}>
+          <View style={[styles.statsRow, styles.statsHeaderRow, styles.statsNameCell]}>
+            <Text style={styles.statsHeaderText}>Player</Text>
           </View>
-          {rows.map((r, i) => (
-            <Pressable
-              key={r.playerId}
-              style={[styles.statsRow, i % 2 === 1 && styles.statsRowAlt]}
-              onPress={() => router.push(`/player/${r.playerId}`)}
-            >
-              <Text style={[styles.statsCell, styles.statsNameCell]}>{r.name}</Text>
-              <Text style={styles.statsCell}>{r.appearances}</Text>
-              <Text style={styles.statsCell}>{r.goals}</Text>
-              <Text style={styles.statsCell}>{r.assists}</Text>
-              <Text style={styles.statsCell}>{r.yellowCards}</Text>
-              <Text style={styles.statsCell}>{r.redCards}</Text>
-              <Text style={styles.statsCell}>{r.minutesPerGoal ?? "-"}</Text>
-            </Pressable>
-          ))}
+          <ScrollView
+            ref={headerScrollRef}
+            horizontal
+            scrollEnabled={false}
+            showsHorizontalScrollIndicator={false}
+          >
+            <View style={[styles.statsRow, styles.statsHeaderRow]}>
+              {STAT_COLUMNS.map((col) => (
+                <Text key={col.key} style={[styles.statsCell, styles.statsHeaderText]}>{col.label}</Text>
+              ))}
+            </View>
+          </ScrollView>
         </View>
-      </ScrollView>
-    </ScrollView>
+
+        {/* Body: the name column is fixed and scrolls vertically only (driven);
+            the stat grid scrolls both ways and drives the header/name column. */}
+        <View style={{ flex: 1, flexDirection: "row" }}>
+          <ScrollView ref={nameColScrollRef} style={{ width: 140 }} scrollEnabled={false} showsVerticalScrollIndicator={false}>
+            {rows.map((r, i) => (
+              <Pressable
+                key={r.playerId}
+                style={[styles.statsRow, styles.statsNameCell, i % 2 === 1 && styles.statsRowAlt]}
+                onPress={() => router.push(`/player/${r.playerId}`)}
+              >
+                <Text style={styles.statsNameText} numberOfLines={1}>{r.name}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          <ScrollView
+            horizontal
+            style={{ flex: 1 }}
+            showsHorizontalScrollIndicator={false}
+            nestedScrollEnabled
+            onScroll={(e) => headerScrollRef.current?.scrollTo({ x: e.nativeEvent.contentOffset.x, animated: false })}
+            scrollEventThrottle={16}
+          >
+            <ScrollView
+              style={{ width: STAT_COLUMNS.length * 76 }}
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled
+              onScroll={(e) => nameColScrollRef.current?.scrollTo({ y: e.nativeEvent.contentOffset.y, animated: false })}
+              scrollEventThrottle={16}
+            >
+              {rows.map((r, i) => (
+                <Pressable
+                  key={r.playerId}
+                  style={[styles.statsRow, i % 2 === 1 && styles.statsRowAlt]}
+                  onPress={() => router.push(`/player/${r.playerId}`)}
+                >
+                  {STAT_COLUMNS.map((col) => (
+                    <Text key={col.key} style={styles.statsCell}>{r[col.key] ?? "-"}</Text>
+                  ))}
+                </Pressable>
+              ))}
+            </ScrollView>
+          </ScrollView>
+        </View>
+      </View>
+    </View>
   );
 }
 
@@ -320,6 +374,11 @@ const styles = StyleSheet.create({
   statsHeaderRow: { borderBottomWidth: 2, borderBottomColor: colors.pitch },
   statsRowAlt: { backgroundColor: colors.card },
   statsCell: { width: 76, color: colors.text, fontSize: 13, textAlign: "center" },
-  statsNameCell: { width: 140, textAlign: "left", fontWeight: "600" },
+  statsNameCell: { width: 140, paddingHorizontal: spacing.sm },
+  statsNameText: { color: colors.text, fontSize: 13, fontWeight: "600", textAlign: "left" },
   statsHeaderText: { fontWeight: "800", color: colors.textMuted, fontSize: 12 },
+  tableWrap: {
+    flex: 1, marginTop: spacing.sm, borderWidth: 1, borderColor: colors.border,
+    borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.card,
+  },
 });
