@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { View, Text, StyleSheet, ScrollView, Image, Pressable, ImageBackground } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuthStore } from "@/store/authStore";
@@ -31,16 +32,24 @@ function ManagerHome() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <ScrollView>
-        <ImageBackground
-          source={team.homePhotoUri ? { uri: team.homePhotoUri } : undefined}
-          style={styles.hero}
-        >
-          <View style={styles.heroOverlay}>
-            {team.logoUri && <Image source={{ uri: team.logoUri }} style={styles.logo} />}
-            <Text style={styles.teamName}>{team.name}</Text>
-            <Text style={styles.teamMeta}>{team.league} · {team.ageGroup} · {team.format}</Text>
+        {team.homePhotoUri ? (
+          <ImageBackground source={{ uri: team.homePhotoUri }} style={styles.hero}>
+            <View style={styles.heroOverlay}>
+              {team.logoUri && <Image source={{ uri: team.logoUri }} style={styles.logo} />}
+              <Text style={styles.teamName}>{team.name}</Text>
+              <Text style={styles.teamMeta}>{team.league} · {team.ageGroup} · {team.format}</Text>
+            </View>
+          </ImageBackground>
+        ) : (
+          <View style={styles.hero}>
+            <TeamHeroBackground />
+            <View style={styles.heroOverlay}>
+              {team.logoUri && <Image source={{ uri: team.logoUri }} style={styles.logo} />}
+              <Text style={styles.teamName}>{team.name}</Text>
+              <Text style={styles.teamMeta}>{team.league} · {team.ageGroup} · {team.format}</Text>
+            </View>
           </View>
-        </ImageBackground>
+        )}
 
         <View style={styles.body}>
           {nextMatch ? (
@@ -175,6 +184,50 @@ function ParentHome() {
     </SafeAreaView>
   );
 }
+
+/**
+ * Default hero background for a team that hasn't uploaded its own home
+ * photo - a designed graphic (gradient, faint pitch markings, a stats
+ * glyph) rather than the old flat green fill, since a manager who never
+ * gets around to setting a photo shouldn't be stuck with a blank banner.
+ */
+function TeamHeroBackground() {
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <LinearGradient
+        colors={["#020A07", "#0B3D2E", "#123D2C"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      {/* Faint pitch markings, echoing the live-match pitch view */}
+      <View style={heroStyles.centreCircle} />
+      <View style={heroStyles.halfLine} />
+      {/* Small rising-bars glyph standing in for "stats" */}
+      <View style={heroStyles.barsWrap}>
+        <View style={[heroStyles.bar, { height: 14 }]} />
+        <View style={[heroStyles.bar, { height: 22 }]} />
+        <View style={[heroStyles.bar, { height: 30 }]} />
+        <View style={[heroStyles.bar, { height: 40 }]} />
+      </View>
+    </View>
+  );
+}
+
+const heroStyles = StyleSheet.create({
+  centreCircle: {
+    position: "absolute", right: -40, top: -40, width: 160, height: 160, borderRadius: 80,
+    borderWidth: 2, borderColor: "rgba(190,255,240,0.18)",
+  },
+  halfLine: {
+    position: "absolute", right: 40, top: 0, bottom: 0, width: 2, backgroundColor: "rgba(190,255,240,0.14)",
+  },
+  barsWrap: {
+    position: "absolute", left: spacing.lg, bottom: spacing.lg + 44, flexDirection: "row",
+    alignItems: "flex-end", gap: 5, opacity: 0.5,
+  },
+  bar: { width: 8, borderRadius: 2, backgroundColor: colors.accent },
+});
 
 function ActionButton({ icon, label, onPress }: { icon: string; label: string; onPress: () => void }) {
   return (

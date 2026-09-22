@@ -7,7 +7,7 @@ import { useMatchStore } from "@/store/matchStore";
 import {
   currentPeriodMinute, formatClock, getPlayerLiveSeconds, getTotalMatchSeconds, isFinalPeriod, totalPeriods,
 } from "@/lib/matchClock";
-import { hasSignificantEquityGap, recommendSubstitutions } from "@/lib/substitutionRecommender";
+import { buildMatchPlan, hasSignificantEquityGap, recommendSubstitutions } from "@/lib/substitutionRecommender";
 import { triggerGoalCelebration, triggerSubstitutionAlert } from "@/lib/haptics";
 import { PitchView, SlotLayout } from "@/components/PitchView";
 import { colors, spacing, radius } from "@/constants/theme";
@@ -93,21 +93,55 @@ export default function MatchLive() {
   }
 
   if (match.status === "scheduled") {
+    const plan = buildMatchPlan({ match, players });
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.kickoffWrap}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.kickoffWrap}>
           <Text style={styles.kickoffOpp}>{match.isHome ? "vs" : "@"} {match.opposition}</Text>
           <Text style={styles.mutedText}>
             {match.format} · {match.minutesPerPeriod} min {match.periodType}
           </Text>
           <Text style={styles.mutedText}>{match.lineup.filter((e) => e.isStarter).length} starters ready</Text>
+
+          {plan && (
+            <View style={styles.planCard}>
+              <Text style={styles.planTitle}>📋 Game plan</Text>
+              <Text style={styles.planText}>
+                Aim for about <Text style={styles.planHighlight}>{plan.fairShareMinutes} min</Text> per outfield
+                player out of {plan.totalMatchMinutes} to keep things fair.
+              </Text>
+              {plan.subWindows.length > 0 ? (
+                <Text style={styles.planText}>
+                  Plan changes around minute{plan.subWindows.length > 1 ? "s" : ""}{" "}
+                  <Text style={styles.planHighlight}>{plan.subWindows.map((w) => `${w}'`).join(", ")}</Text>{" "}
+                  so subs stay warm and everyone gets a fair run.
+                </Text>
+              ) : (
+                <Text style={styles.planText}>
+                  No outfield subs on the bench - your starting XI will need to play the full match.
+                </Text>
+              )}
+              {plan.noCoverPlayerIds.length > 0 && (
+                <Text style={styles.planWarning}>
+                  ⚠️ No like-for-like cover for{" "}
+                  {plan.noCoverPlayerIds
+                    .map((id) => playerById.get(id))
+                    .filter((p): p is Player => !!p)
+                    .map((p) => p.firstName)
+                    .join(", ")}
+                  {" "}- expect them to play longer than their fair share.
+                </Text>
+              )}
+            </View>
+          )}
+
           <Pressable style={styles.kickoffButton} onPress={() => startMatch(match.id)}>
             <Text style={styles.kickoffButtonText}>▶ KICK OFF</Text>
           </Pressable>
           <Pressable onPress={() => router.push(`/match/${match.id}/setup`)}>
             <Text style={styles.linkText}>Edit squad / lineup</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -290,7 +324,7 @@ export default function MatchLive() {
       <Modal visible={!!actionPlayerId} transparent animationType="fade" onRequestClose={() => setActionPlayerId(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setActionPlayerId(null)}>
           <View style={styles.modalCard}>
-            <Text style={styles.sectionTitle}>
+            <Text style={styles.modalTitle}>
               {playerById.get(actionPlayerId ?? "")?.firstName} {playerById.get(actionPlayerId ?? "")?.lastName}
             </Text>
             <ActionRow label="⚽ Goal" onPress={() => actionPlayerId && handleLogGoal(actionPlayerId)} />
@@ -308,7 +342,7 @@ export default function MatchLive() {
       <Modal visible={!!assistPickerFor} transparent animationType="fade" onRequestClose={() => setAssistPickerFor(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => handleLogAssist(assistPickerFor!, null)}>
           <View style={styles.modalCard}>
-            <Text style={styles.sectionTitle}>Who assisted?</Text>
+            <Text style={styles.modalTitle}>Who assisted?</Text>
             <ScrollView style={{ maxHeight: 320 }}>
               {onFieldEntries
                 .filter((e) => e.playerId !== assistPickerFor)
@@ -316,14 +350,14 @@ export default function MatchLive() {
                   const p = playerById.get(e.playerId);
                   if (!p) return null;
                   return (
-                    <Pressable key={e.playerId} style={styles.playerRow} onPress={() => handleLogAssist(assistPickerFor!, e.playerId)}>
-                      <Text style={styles.playerName}>{p.firstName} {p.lastName}</Text>
+                    <Pressable key={e.playerId} style={styles.modalPlayerRow} onPress={() => handleLogAssist(assistPickerFor!, e.playerId)}>
+                      <Text style={styles.modalPlayerName}>{p.firstName} {p.lastName}</Text>
                     </Pressable>
                   );
                 })}
             </ScrollView>
             <Pressable onPress={() => handleLogAssist(assistPickerFor!, null)}>
-              <Text style={styles.linkText}>No assist</Text>
+              <Text style={styles.modalLinkText}>No assist</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -333,14 +367,14 @@ export default function MatchLive() {
       <Modal visible={!!subOffId} transparent animationType="fade" onRequestClose={() => setSubOffId(null)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setSubOffId(null)}>
           <View style={styles.modalCard}>
-            <Text style={styles.sectionTitle}>Who's coming on?</Text>
+            <Text style={styles.modalTitle}>Who's coming on?</Text>
             <ScrollView style={{ maxHeight: 320 }}>
               {benchEntries.map((e) => {
                 const p = playerById.get(e.playerId);
                 if (!p) return null;
                 return (
-                  <Pressable key={e.playerId} style={styles.playerRow} onPress={() => confirmSubstitution(subOffId!, e.playerId)}>
-                    <Text style={styles.playerName}>{p.firstName} {p.lastName}</Text>
+                  <Pressable key={e.playerId} style={styles.modalPlayerRow} onPress={() => confirmSubstitution(subOffId!, e.playerId)}>
+                    <Text style={styles.modalPlayerName}>{p.firstName} {p.lastName}</Text>
                     <Text style={styles.mutedText}>{p.primaryPositions.join(", ")}</Text>
                   </Pressable>
                 );
@@ -355,7 +389,7 @@ export default function MatchLive() {
       <Modal visible={suggestionsModalOpen} transparent animationType="fade" onRequestClose={() => setSuggestionsModalOpen(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setSuggestionsModalOpen(false)}>
           <View style={styles.modalCard}>
-            <Text style={styles.sectionTitle}>Time to make a change</Text>
+            <Text style={styles.modalTitle}>Time to make a change</Text>
             {suggestions?.map((sug, i) => {
               const off = playerById.get(sug.playerOffId);
               const on = playerById.get(sug.playerOnId);
@@ -380,10 +414,10 @@ export default function MatchLive() {
               );
             })}
             <Pressable onPress={() => { setSuggestions(null); setSuggestionsModalOpen(false); }}>
-              <Text style={styles.linkText}>Dismiss</Text>
+              <Text style={styles.modalLinkText}>Dismiss</Text>
             </Pressable>
             <Pressable onPress={() => setSuggestionsModalOpen(false)}>
-              <Text style={styles.linkText}>Keep showing on pitch</Text>
+              <Text style={styles.modalLinkText}>Keep showing on pitch</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -496,6 +530,14 @@ const styles = StyleSheet.create({
   kickoffOpp: { fontSize: 26, fontWeight: "800", color: colors.textOnDark },
   kickoffButton: { marginTop: spacing.xl, backgroundColor: colors.accent, paddingHorizontal: spacing.xl, paddingVertical: spacing.md, borderRadius: radius.pill },
   kickoffButtonText: { fontSize: 18, fontWeight: "800", color: colors.pitch },
+  planCard: {
+    marginTop: spacing.xl, width: "100%", backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: radius.lg, padding: spacing.lg, gap: spacing.sm,
+  },
+  planTitle: { fontSize: 16, fontWeight: "800", color: colors.textOnDark },
+  planText: { fontSize: 14, color: colors.textOnDark, opacity: 0.9, lineHeight: 20 },
+  planHighlight: { fontWeight: "800", color: colors.accent },
+  planWarning: { fontSize: 13, color: colors.accent, lineHeight: 19 },
   linkText: { color: colors.textOnDark, textDecorationLine: "underline", marginTop: spacing.md, textAlign: "center" },
   scoreHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   scoreTeam: { color: colors.textOnDark, fontWeight: "700", flex: 1 },
@@ -521,6 +563,16 @@ const styles = StyleSheet.create({
   eventText: { color: colors.textOnDark, fontSize: 13 },
   modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: spacing.lg },
   modalCard: { backgroundColor: colors.card, borderRadius: radius.lg, padding: spacing.lg },
+  // The modal card is light (colors.card), unlike the dark pitch screen behind
+  // it - sectionTitle/playerRow/playerName/linkText above are white-on-dark
+  // and unreadable here, so modals get their own dark-on-light versions.
+  modalTitle: { fontSize: 15, fontWeight: "700", color: colors.text, marginTop: spacing.lg, marginBottom: spacing.sm },
+  modalPlayerRow: {
+    backgroundColor: colors.background, borderRadius: radius.sm, padding: spacing.md,
+    flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.xs,
+  },
+  modalPlayerName: { fontSize: 15, fontWeight: "700", color: colors.text },
+  modalLinkText: { color: colors.pitch, textDecorationLine: "underline", marginTop: spacing.md, textAlign: "center" },
   actionRow: { paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   actionRowText: { fontSize: 16, fontWeight: "600", color: colors.text },
   suggestionCard: { backgroundColor: colors.background, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
