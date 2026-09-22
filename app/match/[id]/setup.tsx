@@ -118,9 +118,9 @@ export default function MatchSetup() {
     const starters = Object.entries(assignments)
       .map(([slotId, playerId]) => {
         const slot = selectedFormation?.slots.find((s) => s.id === slotId);
-        return slot ? { playerId, position: slot.position } : null;
+        return slot ? { playerId, position: slot.position, slotId } : null;
       })
-      .filter((x): x is { playerId: string; position: PlayingPosition } => !!x);
+      .filter((x): x is { playerId: string; position: PlayingPosition; slotId: string } => !!x);
     setLineup(currentMatch.id, starters);
     router.replace(`/match/${currentMatch.id}/live`);
   }
@@ -150,6 +150,14 @@ export default function MatchSetup() {
       {step === "squad" && (
         <View>
           <Text style={styles.sectionTitle}>Select the squad ({selectedSquad.size} selected)</Text>
+          {players.length === 0 && (
+            <View>
+              <Text style={styles.mutedText}>No players yet - add players to your squad before picking a matchday squad.</Text>
+              <Pressable style={styles.notifyButton} onPress={() => router.push("/(tabs)/squad")}>
+                <Text style={styles.notifyButtonText}>Go to Squad tab</Text>
+              </Pressable>
+            </View>
+          )}
           {players.map((p) => {
             const selected = selectedSquad.has(p.id);
             const invite = invitesForMatch.find((i) => i.playerId === p.id);

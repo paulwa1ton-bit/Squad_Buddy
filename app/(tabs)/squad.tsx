@@ -17,7 +17,7 @@ const ALL_POSITIONS: PlayingPosition[] = [
 ];
 
 export default function Squad() {
-  const [tab, setTab] = useState<"players" | "formations">("players");
+  const [tab, setTab] = useState<"players" | "formations" | "stats">("players");
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -30,9 +30,12 @@ export default function Squad() {
           <Pressable style={[styles.segment, tab === "formations" && styles.segmentActive]} onPress={() => setTab("formations")}>
             <Text style={[styles.segmentText, tab === "formations" && styles.segmentTextActive]}>Formations</Text>
           </Pressable>
+          <Pressable style={[styles.segment, tab === "stats" && styles.segmentActive]} onPress={() => setTab("stats")}>
+            <Text style={[styles.segmentText, tab === "stats" && styles.segmentTextActive]}>Stats</Text>
+          </Pressable>
         </View>
       </View>
-      {tab === "players" ? <PlayersPanel /> : <FormationsPanel />}
+      {tab === "players" ? <PlayersPanel /> : tab === "formations" ? <FormationsPanel /> : <AnalyticsPanel />}
     </SafeAreaView>
   );
 }
@@ -91,8 +94,9 @@ function PlayersPanel() {
                 </Text>
               </View>
               <View style={styles.playerStats}>
-                <Text style={styles.playerStatText}>{totals.appearances} apps</Text>
-                <Text style={styles.playerStatText}>{totals.goals}⚽ {totals.assists}🅰️</Text>
+                <Text style={styles.playerStatText}><Text style={styles.playerStatValue}>{totals.appearances}</Text> apps</Text>
+                <Text style={styles.playerStatText}><Text style={styles.playerStatValue}>{totals.goals}</Text> goals</Text>
+                <Text style={styles.playerStatText}><Text style={styles.playerStatValue}>{totals.assists}</Text> assists</Text>
               </View>
             </Pressable>
           );
@@ -159,10 +163,14 @@ function FormationsPanel() {
         <Text style={styles.mutedText}>Adopt a preset below or build your own.</Text>
       )}
       {myFormations.map((f) => (
-        <View key={f.id} style={styles.formationCard}>
+        <Pressable
+          key={f.id}
+          style={styles.formationCard}
+          onPress={() => router.push({ pathname: "/formation-builder", params: { formationId: f.id } })}
+        >
           <Text style={styles.playerName}>{f.name}</Text>
-          <Text style={styles.mutedText}>{f.format} · {f.isPreset ? "Preset" : "Custom"}</Text>
-        </View>
+          <Text style={styles.mutedText}>{f.format} · Tap to edit</Text>
+        </Pressable>
       ))}
 
       <Pressable
@@ -183,6 +191,85 @@ function FormationsPanel() {
   );
 }
 
+interface AnalyticsRow {
+  playerId: string;
+  name: string;
+  appearances: number;
+  goals: number;
+  assists: number;
+  yellowCards: number;
+  redCards: number;
+  minutesPerGoal: number | null;
+}
+
+function AnalyticsPanel() {
+  const team = useTeamStore((s) => s.team);
+  const players = useTeamStore((s) => s.players.filter((p) => !p.archived));
+  const getSeasonTotals = useMatchStore((s) => s.getSeasonTotals);
+
+  const rows = useMemo<AnalyticsRow[]>(() => {
+    if (!team) return [];
+    return players
+      .map((p) => {
+        const totals = getSeasonTotals(team.id, p.id);
+        return {
+          playerId: p.id,
+          name: `${p.firstName} ${p.lastName}`,
+          appearances: totals.appearances,
+          goals: totals.goals,
+          assists: totals.assists,
+          yellowCards: totals.yellowCards,
+          redCards: totals.redCards,
+          minutesPerGoal: totals.goals > 0 ? Math.round(totals.minutesPlayed / totals.goals) : null,
+        };
+      })
+      .sort((a, b) => b.goals - a.goals || b.appearances - a.appearances || a.name.localeCompare(b.name));
+  }, [players, team, getSeasonTotals]);
+
+  if (rows.length === 0) {
+    return (
+      <View style={{ padding: spacing.lg }}>
+        <Text style={styles.mutedText}>No players yet - add players to see squad analytics.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100 }}>
+      <Text style={styles.sectionTitle}>Season analytics</Text>
+      <Text style={styles.mutedText}>Based on completed matches only.</Text>
+      <ScrollView horizontal style={{ marginTop: spacing.sm }}>
+        <View>
+          <View style={[styles.statsRow, styles.statsHeaderRow]}>
+            <Text style={[styles.statsCell, styles.statsNameCell, styles.statsHeaderText]}>Player</Text>
+            <Text style={[styles.statsCell, styles.statsHeaderText]}>GP</Text>
+            <Text style={[styles.statsCell, styles.statsHeaderText]}>Goals</Text>
+            <Text style={[styles.statsCell, styles.statsHeaderText]}>Assists</Text>
+            <Text style={[styles.statsCell, styles.statsHeaderText]}>YC</Text>
+            <Text style={[styles.statsCell, styles.statsHeaderText]}>RC</Text>
+            <Text style={[styles.statsCell, styles.statsHeaderText]}>Min/Goal</Text>
+          </View>
+          {rows.map((r, i) => (
+            <Pressable
+              key={r.playerId}
+              style={[styles.statsRow, i % 2 === 1 && styles.statsRowAlt]}
+              onPress={() => router.push(`/player/${r.playerId}`)}
+            >
+              <Text style={[styles.statsCell, styles.statsNameCell]}>{r.name}</Text>
+              <Text style={styles.statsCell}>{r.appearances}</Text>
+              <Text style={styles.statsCell}>{r.goals}</Text>
+              <Text style={styles.statsCell}>{r.assists}</Text>
+              <Text style={styles.statsCell}>{r.yellowCards}</Text>
+              <Text style={styles.statsCell}>{r.redCards}</Text>
+              <Text style={styles.statsCell}>{r.minutesPerGoal ?? "-"}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </ScrollView>
+    </ScrollView>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { padding: spacing.lg, paddingBottom: spacing.sm },
@@ -198,8 +285,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border, flexDirection: "row", justifyContent: "space-between", alignItems: "center",
   },
   playerName: { fontSize: 16, fontWeight: "700", color: colors.text },
-  playerStats: { alignItems: "flex-end", gap: 2 },
-  playerStatText: { fontSize: 12, color: colors.textMuted },
+  playerStats: { alignItems: "flex-end", gap: 3, minWidth: 64 },
+  playerStatText: { fontSize: 12, color: colors.textMuted, textAlign: "right" },
+  playerStatValue: { fontWeight: "700", color: colors.text, fontVariant: ["tabular-nums"] },
   fab: {
     position: "absolute", bottom: spacing.lg, left: spacing.lg, right: spacing.lg,
     backgroundColor: colors.pitch, borderRadius: radius.md, padding: spacing.md, alignItems: "center",
@@ -225,4 +313,13 @@ const styles = StyleSheet.create({
   formationCard: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm },
   customButton: { padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderStyle: "dashed", borderColor: colors.pitch, alignItems: "center", marginBottom: spacing.lg },
   customButtonText: { color: colors.pitch, fontWeight: "700" },
+  statsRow: {
+    flexDirection: "row", borderBottomWidth: 1, borderBottomColor: colors.border,
+    paddingVertical: spacing.sm,
+  },
+  statsHeaderRow: { borderBottomWidth: 2, borderBottomColor: colors.pitch },
+  statsRowAlt: { backgroundColor: colors.card },
+  statsCell: { width: 76, color: colors.text, fontSize: 13, textAlign: "center" },
+  statsNameCell: { width: 140, textAlign: "left", fontWeight: "600" },
+  statsHeaderText: { fontWeight: "800", color: colors.textMuted, fontSize: 12 },
 });

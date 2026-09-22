@@ -18,12 +18,18 @@ const FORMAT_SIZE: Record<MatchFormat, number> = { "5v5": 5, "7v7": 7, "9v9": 9,
 const MARKER_SIZE = 44;
 
 export default function FormationBuilder() {
-  const params = useLocalSearchParams<{ format?: string }>();
-  const format = (params.format as MatchFormat) ?? "7v7";
+  const params = useLocalSearchParams<{ format?: string; formationId?: string }>();
   const createCustomFormation = useTeamStore((s) => s.createCustomFormation);
+  const updateFormation = useTeamStore((s) => s.updateFormation);
+  const existingFormation = useTeamStore((s) =>
+    params.formationId ? s.formations.find((f) => f.id === params.formationId) : undefined,
+  );
+  const isEditing = !!existingFormation;
 
-  const [name, setName] = useState("");
-  const [slots, setSlots] = useState<FormationSlot[]>([]);
+  const format = existingFormation?.format ?? (params.format as MatchFormat) ?? "7v7";
+
+  const [name, setName] = useState(existingFormation?.name ?? "");
+  const [slots, setSlots] = useState<FormationSlot[]>(existingFormation?.slots ?? []);
   const [pitchSize, setPitchSize] = useState({ width: 0, height: 0 });
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
 
@@ -72,14 +78,18 @@ export default function FormationBuilder() {
 
   function handleSave() {
     if (!canSave) return;
-    createCustomFormation(name.trim(), format, slots);
+    if (existingFormation) {
+      updateFormation(existingFormation.id, { name: name.trim(), slots });
+    } else {
+      createCustomFormation(name.trim(), format, slots);
+    }
     router.back();
   }
 
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-        <Text style={styles.title}>Custom formation ({format})</Text>
+        <Text style={styles.title}>{isEditing ? "Edit formation" : "Custom formation"} ({format})</Text>
         <Text style={styles.subtitle}>
           Tap "Add position" to place a marker, drag it into place, then tap it to choose the role.
         </Text>

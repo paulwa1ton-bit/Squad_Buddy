@@ -27,7 +27,7 @@ interface MatchState {
 
   setLineup: (
     matchId: string,
-    starters: { playerId: string; position: PlayingPosition }[],
+    starters: { playerId: string; position: PlayingPosition; slotId: string }[],
   ) => void;
 
   updateMatchSquad: (matchId: string, squadPlayerIds: string[]) => void;
@@ -128,6 +128,7 @@ export const useMatchStore = create<MatchState>()(
                   isStarter: starterIds.has(playerId),
                   positionAtStart: starter?.position,
                   currentPosition: starter?.position,
+                  slotId: starter?.slotId,
                   secondsPlayed: existing?.secondsPlayed ?? 0,
                   onFieldSince: existing?.onFieldSince,
                 };
@@ -310,13 +311,14 @@ export const useMatchStore = create<MatchState>()(
               const offEntry = m.lineup.find((e) => e.playerId === playerOffId);
               if (!offEntry) return m;
               const positionHandedOver = offEntry.currentPosition;
+              const slotHandedOver = offEntry.slotId;
 
               const lineup = m.lineup.map((e) => {
                 if (e.playerId === playerOffId) {
-                  return { ...freezeOnFieldEntry(e, m), currentPosition: undefined };
+                  return { ...freezeOnFieldEntry(e, m), currentPosition: undefined, slotId: undefined };
                 }
                 if (e.playerId === playerOnId) {
-                  return { ...e, onFieldSince: nowIso, currentPosition: positionHandedOver };
+                  return { ...e, onFieldSince: nowIso, currentPosition: positionHandedOver, slotId: slotHandedOver };
                 }
                 return e;
               });

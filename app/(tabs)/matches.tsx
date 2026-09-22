@@ -1,10 +1,12 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, FlatList, Pressable, Modal, TextInput, ScrollView, Switch } from "react-native";
+import { View, Text, StyleSheet, FlatList, Pressable, Modal, TextInput, ScrollView, Switch, Alert } from "react-native";
 import { router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTeamStore } from "@/store/teamStore";
 import { useMatchStore } from "@/store/matchStore";
 import { colors, spacing, radius } from "@/constants/theme";
+
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 export default function Matches() {
   const team = useTeamStore((s) => s.team);
@@ -25,13 +27,25 @@ export default function Matches() {
   }
 
   function handleCreate() {
-    if (!team || !opposition.trim() || !kickOffDate) return;
-    const kickOff = new Date(`${kickOffDate}T${kickOffTime || "10:00"}:00`).toISOString();
+    if (!team) return;
+    if (!opposition.trim()) {
+      Alert.alert("Opposition team required", "Enter who you're playing before creating the match.");
+      return;
+    }
+    if (!DATE_REGEX.test(kickOffDate)) {
+      Alert.alert("Date required", "Enter the match date as YYYY-MM-DD, e.g. 2026-09-27.");
+      return;
+    }
+    const kickOff = new Date(`${kickOffDate}T${kickOffTime || "10:00"}:00`);
+    if (Number.isNaN(kickOff.getTime())) {
+      Alert.alert("Invalid date or time", "Check the date (YYYY-MM-DD) and kick-off time (HH:MM) are valid.");
+      return;
+    }
     const match = createMatch({
       teamId: team.id,
       opposition: opposition.trim(),
       location: location.trim() || undefined,
-      kickOff,
+      kickOff: kickOff.toISOString(),
       isHome,
       format: team.format,
       periodType: team.periodType,
