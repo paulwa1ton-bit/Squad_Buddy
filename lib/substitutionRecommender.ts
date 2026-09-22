@@ -1,6 +1,7 @@
 import {
   Match, Player, PlayerMatchEntry, PlayingPosition, SeasonStatsTotals, SubstitutionSuggestion,
 } from "@/types/models";
+import { getPlayerLiveSeconds, totalPeriods } from "@/lib/matchClock";
 
 interface RecommendInput {
   match: Match;
@@ -19,6 +20,26 @@ function totalMinutesIncludingMatch(
   const priorMinutes = seasonTotalsByPlayerId[playerId]?.minutesPlayed ?? 0;
   const thisMatchMinutes = entry ? entry.secondsPlayed / 60 : 0;
   return priorMinutes + thisMatchMinutes;
+}
+
+function isDedicatedGoalkeeper(positions: PlayingPosition[]): boolean {
+  return positions.length > 0 && positions.every((p) => p === "GK");
+}
+
+/**
+ * Whether a bench player could sanely fill the slot being vacated. A
+ * goalkeeper can only be replaced by another goalkeeper, and a
+ * goalkeeper-only player is never sent out to fill an outfield slot -
+ * without this, the equitable-time-only ranking below would happily swap
+ * an outfield sub on for the keeper (or vice versa) purely because they'd
+ * played fewer minutes.
+ */
+function canFillPosition(
+  benchPositions: PlayingPosition[],
+  neededPosition: PlayingPosition | undefined,
+): boolean {
+  if (neededPosition === "GK") return benchPositions.includes("GK");
+  return !isDedicatedGoalkeeper(benchPositions);
 }
 
 function positionFitScore(
@@ -41,10 +62,32 @@ function positionFitScore(
 }
 
 /**
+ * Each outfield squad player's "fair share" of this match's total playing
+ * time, assuming the outfield shirts rotate evenly across everyone
+ * available who isn't a dedicated keeper. The goalkeeper shirt is excluded
+ * from the pool entirely - at grassroots level it doesn't rotate the way
+ * outfield positions do, and this recommender never suggests moving it
+ * anyway (see canFillPosition above).
+ */
+function fairShareSecondsPerOutfieldPlayer(match: Match, players: Player[]): number {
+  const totalTargetSeconds = match.minutesPerPeriod * totalPeriods(match) * 60;
+  const onFieldNow = match.lineup.filter((e) => !!e.onFieldSince);
+  const outfieldSlots = onFieldNow.filter((e) => e.currentPosition !== "GK").length;
+  const playerById = new Map(players.map((p) => [p.id, p]));
+  const outfieldSquadCount = match.squadPlayerIds.filter((id) => {
+    const player = playerById.get(id);
+    return !player || !isDedicatedGoalkeeper(player.primaryPositions);
+  }).length;
+  if (outfieldSlots === 0 || outfieldSquadCount === 0) return 0;
+  return (totalTargetSeconds * outfieldSlots) / outfieldSquadCount;
+}
+
+/**
  * Recommends substitutions balancing (1) position appropriateness of the
- * incoming player and (2) equitable playing time across the squad. Not a
- * strict optimizer - surfaces a ranked shortlist for the manager to accept,
- * tweak, or ignore.
+ * incoming player, (2) equitable playing time across the season, and (3)
+ * how each player's minutes so far *this match* compare to their fair
+ * share of it. Not a strict optimizer - surfaces a ranked shortlist for
+ * the manager to accept, tweak, or ignore.
  */
 export function recommendSubstitutions({
   match,
@@ -54,6 +97,7 @@ export function recommendSubstitutions({
 }: RecommendInput): SubstitutionSuggestion[] {
   const entryByPlayerId = new Map(match.lineup.map((e) => [e.playerId, e]));
   const playerById = new Map(players.map((p) => [p.id, p]));
+  const fairShareSeconds = fairShareSecondsPerOutfieldPlayer(match, players);
 
   const onFieldNow = match.lineup.filter((e) => !!e.onFieldSince);
   const bench = match.squadPlayerIds
@@ -67,6 +111,7 @@ export function recommendSubstitutions({
     .map((entry) => ({
       entry,
       totalMinutes: totalMinutesIncludingMatch(entry.playerId, entry, seasonTotalsByPlayerId),
+      thisMatchSeconds: getPlayerLiveSeconds(entry, match),
       hasYellow: match.events.some(
         (e) => e.type === "yellow_card" && e.playerId === entry.playerId,
       ),
@@ -78,26 +123,53 @@ export function recommendSubstitutions({
       entry,
       player: playerById.get(entry.playerId),
       totalMinutes: totalMinutesIncludingMatch(entry.playerId, entry, seasonTotalsByPlayerId),
+      thisMatchSeconds: getPlayerLiveSeconds(entry, match),
     }))
     .filter((c) => !!c.player)
     .sort((a, b) => a.totalMinutes - b.totalMinutes);
+
+  const totalMatchSecondsSoFar = onFieldNow.reduce((sum, e) => sum + getPlayerLiveSeconds(e, match), 0)
+    + bench.reduce((sum, e) => sum + getPlayerLiveSeconds(e, match), 0);
+  const remainingMatchSeconds = Math.max(
+    0,
+    match.minutesPerPeriod * totalPeriods(match) * 60 * onFieldNow.length - totalMatchSecondsSoFar,
+  );
 
   const suggestions: SubstitutionSuggestion[] = [];
   const usedOnIds = new Set<string>();
 
   for (const off of candidatesOff) {
     if (suggestions.length >= maxSuggestions) break;
-    const bestOn = candidatesOn.find((c) => !usedOnIds.has(c.entry.playerId));
-    if (!bestOn || !bestOn.player) continue;
+
+    const eligible = candidatesOn.filter(
+      (c) => !usedOnIds.has(c.entry.playerId) && c.player
+        && canFillPosition(c.player.primaryPositions, off.entry.currentPosition),
+    );
+    if (eligible.length === 0) continue; // no sane replacement for this shirt right now
+
+    // Among eligible replacements, prefer whoever is furthest behind their
+    // fair share of this match; season-long minutes break ties.
+    const bestOn = [...eligible].sort((a, b) => {
+      const gapA = fairShareSeconds - a.thisMatchSeconds;
+      const gapB = fairShareSeconds - b.thisMatchSeconds;
+      return gapB - gapA || a.totalMinutes - b.totalMinutes;
+    })[0];
+    if (!bestOn.player) continue;
 
     const fit = positionFitScore(bestOn.player.primaryPositions, off.entry.currentPosition);
     const minutesGap = off.totalMinutes - bestOn.totalMinutes;
-    // Weight equitable-time gap more heavily than position fit, but still
-    // reward a good positional match so the suggestion is tactically sane.
-    const score = minutesGap * 0.7 + fit * 30 + (off.hasYellow ? 10 : 0);
+    const onFairShareGapMinutes = (fairShareSeconds - bestOn.thisMatchSeconds) / 60;
+    // Weight equitable-time gap most heavily (both season-long and this
+    // match's fair share), then reward a good positional match so the
+    // suggestion is still tactically sane.
+    const score = minutesGap * 0.5 + Math.max(0, onFairShareGapMinutes) * 0.5 + fit * 30 + (off.hasYellow ? 10 : 0);
 
     const reasonParts: string[] = [];
-    if (minutesGap > 5) {
+    if (onFairShareGapMinutes > 3) {
+      reasonParts.push(
+        `${Math.round(onFairShareGapMinutes)} min behind a fair share of this match`,
+      );
+    } else if (minutesGap > 5) {
       reasonParts.push(
         `${Math.round(minutesGap)} fewer minutes played so far`,
       );
@@ -106,6 +178,9 @@ export function recommendSubstitutions({
     else if (fit >= 0.6) reasonParts.push("covers the same area of the pitch");
     if (off.hasYellow) reasonParts.push("currently on a yellow card");
     if (reasonParts.length === 0) reasonParts.push("next in line for game time");
+    if (remainingMatchSeconds > 0 && onFairShareGapMinutes > 3) {
+      reasonParts.push(`${Math.round(remainingMatchSeconds / 60)} min left to even things up`);
+    }
 
     suggestions.push({
       playerOffId: off.entry.playerId,
@@ -117,4 +192,24 @@ export function recommendSubstitutions({
   }
 
   return suggestions.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * True when at least one bench player is meaningfully behind their fair
+ * share of this match's playing time and there's a sane (position-eligible)
+ * replacement for them. Used to proactively nudge the manager at natural
+ * breaks (e.g. the end of a period) rather than only when they remember to
+ * tap "Recommend a substitution".
+ */
+export function hasSignificantEquityGap(input: RecommendInput): boolean {
+  const suggestions = recommendSubstitutions(input);
+  if (suggestions.length === 0) return false;
+  const fairShareSeconds = fairShareSecondsPerOutfieldPlayer(input.match, input.players);
+  const entryByPlayerId = new Map(input.match.lineup.map((e) => [e.playerId, e]));
+  return suggestions.some((s) => {
+    const onEntry = entryByPlayerId.get(s.playerOnId);
+    if (!onEntry) return false;
+    const gapMinutes = (fairShareSeconds - getPlayerLiveSeconds(onEntry, input.match)) / 60;
+    return gapMinutes > 5;
+  });
 }

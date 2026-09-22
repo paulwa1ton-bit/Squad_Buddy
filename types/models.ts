@@ -103,6 +103,8 @@ export interface PlayerMatchEntry {
   secondsPlayed: number; // running total, updated live
   onFieldSince?: string; // ISO timestamp, undefined when on the bench
   currentPosition?: PlayingPosition;
+  /** The chosen formation's FormationSlot id this player currently occupies, when on the pitch. */
+  slotId?: string;
 }
 
 export type MatchStatus = "scheduled" | "live" | "paused" | "completed";

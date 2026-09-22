@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
 import { useTeamStore } from "@/store/teamStore";
 import { useMatchStore } from "@/store/matchStore";
@@ -22,6 +22,8 @@ export default function PlayerProfile() {
   const matches = useMatchStore((s) => s.matches.filter((m) => m.teamId === team?.id && m.status === "completed"));
 
   const [editing, setEditing] = useState(false);
+  const [firstName, setFirstName] = useState(player?.firstName ?? "");
+  const [lastName, setLastName] = useState(player?.lastName ?? "");
   const [shirtNumber, setShirtNumber] = useState(player?.shirtNumber?.toString() ?? "");
   const [positions, setPositions] = useState<PlayingPosition[]>(player?.primaryPositions ?? []);
 
@@ -43,10 +45,24 @@ export default function PlayerProfile() {
   }
 
   function saveEdits() {
+    if (!firstName.trim() || !lastName.trim()) {
+      Alert.alert("Name required", "First and last name can't be empty.");
+      return;
+    }
     updatePlayer(player!.id, {
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
       shirtNumber: shirtNumber ? Number(shirtNumber) : undefined,
       primaryPositions: positions,
     });
+    setEditing(false);
+  }
+
+  function cancelEdits() {
+    setFirstName(player!.firstName);
+    setLastName(player!.lastName);
+    setShirtNumber(player!.shirtNumber?.toString() ?? "");
+    setPositions(player!.primaryPositions);
     setEditing(false);
   }
 
@@ -62,11 +78,15 @@ export default function PlayerProfile() {
             {player.primaryPositions.length > 0 ? player.primaryPositions.join(", ") : "No positions set"}
           </Text>
           <Pressable style={styles.editButton} onPress={() => setEditing(true)}>
-            <Text style={styles.editButtonText}>Edit positions & shirt number</Text>
+            <Text style={styles.editButtonText}>Edit player details</Text>
           </Pressable>
         </>
       ) : (
         <View style={styles.editPanel}>
+          <Text style={styles.label}>First name</Text>
+          <TextInput style={styles.input} value={firstName} onChangeText={setFirstName} />
+          <Text style={styles.label}>Last name</Text>
+          <TextInput style={styles.input} value={lastName} onChangeText={setLastName} />
           <Text style={styles.label}>Shirt number</Text>
           <TextInput style={styles.input} value={shirtNumber} onChangeText={setShirtNumber} keyboardType="number-pad" />
           <Text style={styles.label}>Positions</Text>
@@ -81,7 +101,7 @@ export default function PlayerProfile() {
             })}
           </View>
           <View style={styles.modalActions}>
-            <Pressable style={styles.cancelButton} onPress={() => setEditing(false)}>
+            <Pressable style={styles.cancelButton} onPress={cancelEdits}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </Pressable>
             <Pressable style={styles.saveButton} onPress={saveEdits}>
