@@ -5,6 +5,7 @@ import { getReactNativePersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import { Platform } from "react-native";
 
 // Fill these in from your Firebase project's config (Project settings > General
 // > Your apps > SDK setup and configuration), or supply them via app.json's
@@ -22,14 +23,24 @@ const firebaseConfig: FirebaseOptions = {
 
 export const firebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
+// getReactNativePersistence wraps AsyncStorage and is RN-only: on web it
+// doesn't throw, it just hangs initializeAuth forever (the "Create account"/
+// "Log in" button spins indefinitely with no network request ever sent,
+// e.g. when running `npx expo start --web`). The web SDK already has its own
+// working IndexedDB-backed persistence via plain getAuth(), so only take the
+// AsyncStorage path on native.
 let authInstance: Auth;
-try {
-  authInstance = initializeAuth(firebaseApp, {
-    persistence: getReactNativePersistence(AsyncStorage),
-  });
-} catch {
-  // initializeAuth throws if already called (e.g. fast refresh) - fall back to getAuth
+if (Platform.OS === "web") {
   authInstance = getAuth(firebaseApp);
+} else {
+  try {
+    authInstance = initializeAuth(firebaseApp, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+  } catch {
+    // initializeAuth throws if already called (e.g. fast refresh) - fall back to getAuth
+    authInstance = getAuth(firebaseApp);
+  }
 }
 export const auth = authInstance;
 
